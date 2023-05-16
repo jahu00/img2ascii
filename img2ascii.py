@@ -1,6 +1,7 @@
 from PIL import Image, ImageDraw
 import sys
 import math
+from settings import *
 
 #print(f"Arguments count: {len(sys.argv)}")
 #for i, arg in enumerate(sys.argv):
@@ -33,66 +34,41 @@ def paint_character(character_image, background_color, foreground_color):
     result.putdata(dst_pixels)
     return result
 
-def get_setting_values(setting_name, settings = sys.argv, prefix = "--", suffix = "="):
-    affixed_setting_name = prefix + setting_name + suffix
-    prefix_len = len(affixed_setting_name)
-    results = [x[prefix_len:] for x in settings if x.startswith(affixed_setting_name)]
-    return results
+def read_charset(file_name):
+    with open(file_name, 'r') as f:
+        charset = [int(line.rstrip()) for line in f]
+        return charset
 
-def get_setting_value(setting_name, settings = sys.argv, prefix = "--", suffix = "="):
-    values = get_setting_values(setting_name=setting_name, settings=settings, prefix=prefix, suffix=suffix)
-    values_len = len(values)
-    if values_len == 0:
-        return None
-    assert values_len < 2, "expected 1 or 0 settings with name " + setting_name 
-    return values[0]
 
-def get_int_setting(setting_name, default = None, settings = sys.argv, prefix = "--", suffix = "="):
-    value = get_setting_value(setting_name=setting_name, settings=settings, prefix=prefix, suffix=suffix)
-    if value is None:
-        return default
-    
-    return int(value)
+src_image_name = get_setting_value("src")
+if src_image_name is None:
+    raise ValueError("src has to befined")
 
-def get_bool_setting(setting_name, settings = sys.argv, prefix = "--"):
-    values = get_setting_values(setting_name=setting_name, settings=settings, prefix=prefix, suffix="")
-    for value in values:
-        if len(value) == 0:
-            return True
-        
-    return False
+dst_image_name = get_setting_value("dst")
+if dst_image_name is None:
+    raise ValueError("dst has to befined")
 
-def get_resampling_setting(setting_name, default = None, settings = sys.argv, prefix = "--", suffix = "="):
-    value = get_setting_value(setting_name=setting_name, settings=settings, prefix=prefix, suffix=suffix)
-    if value is None:
-        return default
-    
-    value = value.lower()
-
-    match value:
-        case 'bilinear':
-            return Image.BILINEAR
-        case 'bicubic':
-            return Image.BICUBIC
-        case 'lanczos':
-            return Image.LANCZOS
-        case 'nearest':
-            return Image.NEAREST
-    
-    raise ValueError("Invalid resampling method " + value)
-    
-
-src_image_name = sys.argv[1]
-dst_image_name = sys.argv[2]
 mode = "grayscale"
 font_name = "ega_8x8.png"
-charset = list(range(32, 128))
-cols = 80
-#rows = 25
-rows = 40
+
+font_image = Image.open(font_name)
+font_image = font_image.convert("L")
 character_width = 8
 #character_height = 16
 character_height = 8
+characters_per_row = font_image.width / character_width
+
+charset_name = get_setting_value("charset")
+charset = []
+if charset_name is not None:
+    charset = read_charset(charset_name + ".charset")
+else:
+    character_count = (font_image.height / character_height) * characters_per_row
+    charset = list(range(character_count))
+    
+cols = 80
+#rows = 25
+rows = 40
 invert = get_bool_setting("invert")
 adjust_brightness = get_bool_setting("adjust-brightness")
 #crop = get_bool_setting("--adjust-brightness")
@@ -120,10 +96,6 @@ if correction > 1:
 
 dst_size_corrected = (dst_width_corrected, dst_height_corrected)
 
-font_image = Image.open(font_name)
-font_image = font_image.convert("L")
-characters_per_row = font_image.width / character_width
-
 src_image = Image.open(src_image_name)
 
 downscaled_src_image = src_image.resize((cols, rows)).convert("L")
@@ -145,9 +117,6 @@ if mode == "grayscale":
                 average_image = colorized_character_image.resize((1, 1), Image.BILINEAR)
                 average = get_pixels(average_image)[0]
                 average = round(average, 0)
-
-                if background_color_id == 1 and foreground_color_id == 0:
-                    colorized_character_image.save("dump/" + str(character_id) + "-" + str(average) + ".png")
 
                 if average not in character_brightness_map:
                     character_brightness_map[average] = []
@@ -225,4 +194,4 @@ if mode == "grayscale":
     dst_image.save(dst_image_name)
 
     #venv\Scripts\activate.bat
-    #python img2ascii.py test.png test_output.png
+    #python img2ascii.py --src=test.png --dst=output/test_output_12.png --charset=ansi --upscale=2
