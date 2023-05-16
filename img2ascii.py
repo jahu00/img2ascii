@@ -71,7 +71,7 @@ cols = 80
 rows = 40
 invert = get_bool_setting("invert")
 adjust_brightness = get_bool_setting("adjust-brightness")
-#crop = get_bool_setting("--adjust-brightness")
+crop = get_setting_value("crop")
 upscale = get_int_setting("upscale", 1)
 correction = 3 / 4
 
@@ -97,6 +97,23 @@ if correction > 1:
 dst_size_corrected = (dst_width_corrected, dst_height_corrected)
 
 src_image = Image.open(src_image_name)
+
+dst_proportions = dst_width_corrected / dst_height_corrected
+src_proportions = src_image.width / src_image.height
+
+if dst_proportions != src_proportions:
+    cropped_width = src_image.width
+    cropped_height = src_image.height
+    if crop == "inner":
+        if dst_proportions < src_proportions:
+            cropped_width = src_image.height * dst_proportions
+        else:
+            cropped_height = src_image.width / dst_proportions
+    crop_left = int((src_image.width - cropped_width) / 2)
+    crop_top = int((src_image.height - cropped_height) / 2)
+    crop_right = crop_left + cropped_width
+    crop_bottom = crop_top + cropped_height
+    src_image = src_image.crop((crop_left, crop_top, crop_right, crop_bottom))
 
 downscaled_src_image = src_image.resize((cols, rows)).convert("L")
 
