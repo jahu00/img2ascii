@@ -1,0 +1,11 @@
+arabic-reshaper==3.0.0
+fonttools==4.39.4
+freetype-py==2.3.0
+monobit==0.40.4
+Pillow==9.5.0
+pycairo==1.23.0
+python-bidi==0.4.2
+reportlab==4.0.0
+rlPyCairo==0.2.0
+six==1.16.0
+uniseg==0.7.2
