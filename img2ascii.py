@@ -1,11 +1,8 @@
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps, ImageColor
 import sys
 import math
 from settings import *
-
-#print(f"Arguments count: {len(sys.argv)}")
-#for i, arg in enumerate(sys.argv):
-#    print(f"Argument {i:>6}: {arg}")
+import time
 
 def sign(number):
     if math.isnan(number):
@@ -34,11 +31,68 @@ def paint_character(character_image, background_color, foreground_color):
     result.putdata(dst_pixels)
     return result
 
-def read_charset(file_name):
+def compare_images(image1, image2, aggregate_method=sum):
+    pixels1 = get_pixels(image1)
+    pixels2 = get_pixels(image2)
+    
+    return compare_pixels(pixels1, pixels2, aggregate_method=aggregate_method)
+
+def is_touple_or_list(var1):
+    if type(var1) is tuple or type(var1) is list:
+        return True
+    
+    return False
+
+def compare_pixels(pixels1, pixels2, aggregate_method=sum, weights=[1,1,1,1]):
+    pixels1_len = len(pixels1)
+    pixels2_len = len(pixels2)
+    if pixels1_len != pixels2_len:
+        raise ValueError("mismatching pixle count")
+    
+    result = 0
+
+    is_enumerable = None
+
+    for i in range(0, pixels1_len):
+        pixel1 = pixels1[i]
+        pixel2 = pixels2[i]
+        diffs = []
+        if is_enumerable is None:
+            is_enumerable = is_touple_or_list(pixel1)
+        if is_enumerable:
+            for n in range(len(pixel1)):
+                diffs.append(abs(pixel1[n] - pixel2[n])*weights[n])
+        else:
+            diffs.append(abs(pixel1 - pixel2)*weights[0])
+
+        result += aggregate_method(diffs)
+
+    return result
+
+def pixels_to_touple(pixels):
+    result = []
+    for pixel in pixels:
+        result += list(pixel)
+
+    return tuple(result)
+
+def square_sum(values):
+    values = [value * value for value in values]
+    return sum(values)
+
+def read_ints(file_name):
     with open(file_name, 'r') as f:
         charset = [int(line.rstrip()) for line in f]
         return charset
 
+def read_colors(file_name):
+    with open(file_name, 'r') as f:
+        colors = [ImageColor.getcolor(line.rstrip(), "RGB") for line in f]
+        return colors
+
+def get_proportions(str_value):
+    x, y = [float(value) for value in str_value.split(":")]
+    return x / y
 
 src_image_name = get_setting_value("src")
 if src_image_name is None:
@@ -48,37 +102,75 @@ dst_image_name = get_setting_value("dst")
 if dst_image_name is None:
     raise ValueError("dst has to befined")
 
+start_time = time.time()
+
 mode = "grayscale"
 font_name = "ega_8x8.png"
 
 font_image = Image.open(font_name)
 font_image = font_image.convert("L")
-character_width = 8
-#character_height = 16
-character_height = 8
+character_size = get_resolution_setting("char-size", (8,8))
+character_width, character_height = character_size
 characters_per_row = font_image.width / character_width
 
-charset_name = get_setting_value("charset")
+charset_name = get_str_setting("charset")
 charset = []
 if charset_name is not None:
-    charset = read_charset(charset_name + ".charset")
+    charset = read_ints(charset_name + ".charset")
 else:
     character_count = (font_image.height / character_height) * characters_per_row
     charset = list(range(character_count))
-    
-cols = 80
-#rows = 25
-rows = 40
+
+charmap_name = get_str_setting("charmap")
+charmap = None
+if charmap_name is not None:
+    charmap = read_ints(charmap_name + ".charmap")
+
+output = "image"
+output_mode_str = get_resolution_setting("output", "auto")
+
+if output_mode_str == "text":
+    output = "text"
+elif output_mode_str == "auto":
+    if dst_image_name.endswith(".txt"):
+        output = "text"
+
+output_size = get_resolution_setting("output-size", (80,40))
+cols, rows = output_size
 invert = get_bool_setting("invert")
 adjust_brightness = get_bool_setting("adjust-brightness")
-crop = get_setting_value("crop")
+enable_lookup = get_bool_setting("lookup")
+crop = get_str_setting("crop")
+color_space = get_str_setting("color-space", "RGB")
 upscale = get_int_setting("upscale", 1)
-correction = 3 / 4
+correction_str = get_str_setting("correction", "1:1")
+correction = get_proportions(correction_str)
 
-foreground_colors = [(0,0,0),(85,85,85),(170,170,170),(255,255,255)]
-background_colors = [(0,0,0),(170,170,170)]
-froeground_color_map = [0,8,7,15]
-background_color_map = [0,7]
+tile_size = get_resolution_setting("tile-size", (1,1))
+tile_width, tile_height = tile_size
+tile_resampler = get_resampling_setting("tile-resampler", Image.BICUBIC)
+character_resampler = get_resampling_setting("tile-resampler", Image.BICUBIC)
+aggregate_method_name = get_str_setting("aggregate", "sum")
+weights = get_float_settings("weight", [1, 1, 1, 1])
+aggregate_method = sum
+
+if aggregate_method_name == "sqr_sum":
+    aggregate_method = square_sum
+
+colors = [(0,0,0),(255,255,255)]
+colors_name = get_str_setting("colors")
+if colors_name is not None:
+    colors = read_colors(colors_name + ".colors")
+
+color_combinations = []
+
+#for background_color_id, background_color in enumerate(colors):
+#    for foreground_color_id, foreground_color in enumerate(colors):
+#        if foreground_color_id == background_color_id:
+#            continue
+#        color_combinations.append((background_color_id, foreground_color_id))
+
+color_combinations = [(0,1)]
 
 dst_width = cols * character_width
 dst_height = rows * character_height
@@ -97,6 +189,10 @@ if correction > 1:
 dst_size_corrected = (dst_width_corrected, dst_height_corrected)
 
 src_image = Image.open(src_image_name)
+src_image = src_image.convert("RGB")
+
+if invert:
+    src_image = ImageOps.invert(src_image)
 
 dst_proportions = dst_width_corrected / dst_height_corrected
 src_proportions = src_image.width / src_image.height
@@ -115,32 +211,37 @@ if dst_proportions != src_proportions:
     crop_bottom = crop_top + cropped_height
     src_image = src_image.crop((crop_left, crop_top, crop_right, crop_bottom))
 
-downscaled_src_image = src_image.resize((cols, rows)).convert("L")
+downscaled_src_image = src_image.resize((cols * tile_width, rows * tile_height), tile_resampler)
 
-if mode == "grayscale":
-    character_brightness_map = {}
+palette = []
+brightnesses = []
 
-    for character_id in charset:
-        x = character_id % characters_per_row
-        y = math.floor(character_id / characters_per_row)
-        character_image = font_image.crop((x * character_width, y * character_height, (x + 1) * character_width, (y + 1) * character_height))
-        for background_color_id, background_color in enumerate(background_colors):
-            for foreground_color_id, foreground_color in enumerate(foreground_colors):
-                if foreground_color == background_color:
-                    continue
+for character_id in charset:
+    x = character_id % characters_per_row
+    y = math.floor(character_id / characters_per_row)
+    character_image = font_image.crop((x * character_width, y * character_height, (x + 1) * character_width, (y + 1) * character_height))
+    for background_color_id, foreground_color_id in color_combinations:
+        colorized_character_image = paint_character(character_image, colors[background_color_id], colors[foreground_color_id])
+        character_tile_image = colorized_character_image.resize(tile_size, character_resampler)
+        
+        if adjust_brightness:
+            average_image = colorized_character_image.resize((1,1), character_resampler)
+            average_image = average_image.convert("L")
+            average = get_pixels(average_image)[0]
+            brightnesses.append(average)
+        
+        character_tile_image = character_tile_image.convert(color_space)
 
-                colorized_character_image = paint_character(character_image, background_color, foreground_color)
-                colorized_character_image = colorized_character_image.convert("L")
-                average_image = colorized_character_image.resize((1, 1), Image.BILINEAR)
-                average = get_pixels(average_image)[0]
-                average = round(average, 0)
+        palette.append({
+            "character_id": character_id,
+            "character_image": colorized_character_image,
+            #"tile_image": character_tile_image,
+            "tile_pixels": get_pixels(character_tile_image),
+            "background_color_id": background_color_id,
+            "foreground_color_id": foreground_color_id
+            })
 
-                if average not in character_brightness_map:
-                    character_brightness_map[average] = []
-
-                character_brightness_map[average].append({"character_id": character_id, "character_image": colorized_character_image, "background_color_id": background_color_id, "foreground_color_id": foreground_color_id})
-
-    brightnesses = list(character_brightness_map.keys())
+if adjust_brightness:
     brightnesses.sort()
 
     min_brightness = min(brightnesses)
@@ -148,67 +249,100 @@ if mode == "grayscale":
 
     assert max_brightness > min_brightness, "charset results in a single brightness"
 
-    if adjust_brightness:
-        b = -1 * min_brightness
-        a = (255 + b) / max_brightness
-        new_character_brightness_map = {}
-        for brightness in brightnesses:
-            new_brightness = int(brightness) * a + b
-            new_character_brightness_map[new_brightness] = character_brightness_map[brightness]
-        
-        character_brightness_map = new_character_brightness_map
-        brightnesses = list(character_brightness_map.keys())
+
+    b = -1 * min_brightness
+    a = (255 + b) / max_brightness
+    
+    if color_space == "L":
+        for character in palette:
+            character["tile_pixels"] = [pixel * a + b for pixel in character["tile_pixels"]]
 
 
 
-    brightness_map = []
+# brightness_map = []
 
-    for i in range(256):
-        matching_brightness = None
-        last_sign = None
-        last_diff = None
-        for brightness in brightnesses:
-            diff = brightness - i
-            diff_sign = sign(diff)
-            if last_diff is not None and matching_brightness is not None and last_sign is not None and last_sign != diff_sign:
-                if abs(last_diff) > abs(diff):
-                    matching_brightness = brightness
-                    break
-                break
-            matching_brightness = brightness
-            last_sign = diff_sign
-            last_diff = diff
-        
-        brightness_map.append([matching_brightness])
+# for i in range(256):
+#     matching_brightness = None
+#     last_sign = None
+#     last_diff = None
+#     for brightness in brightnesses:
+#         diff = brightness - i
+#         diff_sign = sign(diff)
+#         if last_diff is not None and matching_brightness is not None and last_sign is not None and last_sign != diff_sign:
+#             if abs(last_diff) > abs(diff):
+#                 matching_brightness = brightness
+#                 break
+#             break
+#         matching_brightness = brightness
+#         last_sign = diff_sign
+#         last_diff = diff
+    
+#     brightness_map.append([matching_brightness])
 
-    src_pixels = get_pixels(downscaled_src_image)
+#src_pixels = get_pixels(downscaled_src_image)
 
-    dst_image = Image.new(mode="L", size=(dst_width, dst_height))
+if output == "image":
+    dst_image = Image.new(mode="RGB", size=(dst_width, dst_height))
     dst_image_draw = ImageDraw.Draw(dst_image)
-    dst_text = ""
 
-    pixel_count = 0
-    for row in range(rows):
-        for col in range(cols):
-            pixel = src_pixels[pixel_count]
-            if invert:
-                pixel = 255 - pixel
+dst_text = ""
 
-            possible_brightnesses = brightness_map[pixel]
-            brightness = possible_brightnesses[(pixel_count % len(possible_brightnesses)) - 1]
-            characters = character_brightness_map[brightness]
-            character = characters[(pixel_count % len(characters)) - 1]
-            dst_text += chr(character["character_id"])
-            dst_image.paste(character["character_image"], (col * character_width, row * character_height))
-            pixel_count += 1
+lookup = {}
+for row in range(rows):
+    for col in range(cols):
+        palette_match = []
+        image_tile = downscaled_src_image.crop((col * tile_width, row * tile_height, (col + 1) * tile_width, (row + 1) * tile_height))
+        image_tile = image_tile.convert(color_space)
+        tile_pixels = get_pixels(image_tile)
+        lookup_key = None
+        character_match = None
         
-        dst_text += "\n"
+        if enable_lookup:
+            if color_space == "L":
+                lookup_key = tuple(tile_pixels)
+            else:
+                lookup_key = pixels_to_touple(tile_pixels)
+            character_match = lookup.get(lookup_key)
 
-    #print(dst_text)
+        if character_match is None:
+            for character in palette:
+                diff = compare_pixels(tile_pixels, character["tile_pixels"], aggregate_method=aggregate_method, weights=weights)
+                palette_match.append({"diff": diff, "character": character})
 
+            palette_match.sort(key=lambda match: match["diff"])
+            character_match = palette_match[0]["character"]
+
+        if enable_lookup:
+            lookup[lookup_key] = character_match
+
+        #possible_brightnesses = brightness_map[pixel]
+        #brightness = possible_brightnesses[(pixel_count % len(possible_brightnesses)) - 1]
+        #characters = character_brightness_map[brightness]
+        #character = characters[(pixel_count % len(characters)) - 1]
+        if output == "text":
+            if charmap is None:
+                dst_text += chr(character_match["character_id"])
+            else:
+                dst_text += chr(charmap[character_match["character_id"]])
+
+        if output == "image":
+            dst_image.paste(character_match["character_image"], (col * character_width, row * character_height))
+        #pixel_count += 1
+    
+    dst_text += "\n"
+
+#print(dst_text)
+
+if output == "image":
     dst_image = dst_image.resize(dst_size_corrected, Image.NEAREST)
-
     dst_image.save(dst_image_name)
 
-    #venv\Scripts\activate.bat
-    #python img2ascii.py --src=test.png --dst=output/test_output_12.png --charset=ansi --upscale=2
+if output == "text":
+    with open(dst_image_name, 'w', newline='\n', encoding="utf8") as f:
+        f.write(dst_text)
+
+print("Complete in %s s" % (time.time() - start_time))
+
+#venv\Scripts\activate.bat
+#python img2ascii.py --src=test.png --dst=output/test_output_30.png --charset=block --upscale=2 --crop=inner --color-space=HSV --lookup --aggregate=sqr_sum --correction=3:4
+#python img2ascii.py --src=test.png --dst=output/test_output_33.txt --charset=ascii --upscale=2 --crop=inner --color-space=L --lookup --aggregate=sum --correction=3:4 --adjust-brightness --invert --charmap=utf8
