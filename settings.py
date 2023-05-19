@@ -43,8 +43,8 @@ def get_resolution_setting(setting_name, default = None, settings = sys.argv, pr
     if value is None:
         return default
 
-    width, height = "x".split(value)
-    return (width, height)
+    width, height = value.split("x")
+    return (int(width), int(height))
 
 def get_resampling_setting(setting_name, default = None, settings = sys.argv, prefix = "--", suffix = "="):
     value = get_setting_value(setting_name=setting_name, settings=settings, prefix=prefix, suffix=suffix)

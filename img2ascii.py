@@ -1,5 +1,4 @@
 from PIL import Image, ImageDraw, ImageOps, ImageColor
-import sys
 import math
 from settings import *
 import time
@@ -82,12 +81,17 @@ def square_sum(values):
 
 def read_ints(file_name):
     with open(file_name, 'r') as f:
-        charset = [int(line.rstrip()) for line in f]
-        return charset
+        ints = [int(line.rstrip()) for line in f]
+        return ints
+
+def read_int_lists(file_name):
+    with open(file_name, 'r') as f:
+        lists = [[int(value) for value in line.strip().split(",")] for line in f]
+        return lists
 
 def read_colors(file_name):
     with open(file_name, 'r') as f:
-        colors = [ImageColor.getcolor(line.rstrip(), "RGB") for line in f]
+        colors = [ImageColor.getcolor(line.strip(), "RGB") for line in f]
         return colors
 
 def get_proportions(str_value):
@@ -105,20 +109,20 @@ if dst_image_name is None:
 start_time = time.time()
 
 mode = "grayscale"
-font_name = "ega_8x8.png"
+font_name = get_str_setting("font")#"ega_8x8.png"
 
 font_image = Image.open(font_name)
 font_image = font_image.convert("L")
 character_size = get_resolution_setting("char-size", (8,8))
 character_width, character_height = character_size
-characters_per_row = font_image.width / character_width
+characters_per_row = int(font_image.width / character_width)
 
 charset_name = get_str_setting("charset")
 charset = []
 if charset_name is not None:
     charset = read_ints(charset_name + ".charset")
 else:
-    character_count = (font_image.height / character_height) * characters_per_row
+    character_count = int((font_image.height / character_height) * characters_per_row)
     charset = list(range(character_count))
 
 charmap_name = get_str_setting("charmap")
@@ -162,15 +166,16 @@ colors_name = get_str_setting("colors")
 if colors_name is not None:
     colors = read_colors(colors_name + ".colors")
 
+color_combinations_str = get_str_setting("palette")
 color_combinations = []
-
-#for background_color_id, background_color in enumerate(colors):
-#    for foreground_color_id, foreground_color in enumerate(colors):
-#        if foreground_color_id == background_color_id:
-#            continue
-#        color_combinations.append((background_color_id, foreground_color_id))
-
-color_combinations = [(0,1)]
+if color_combinations_str is not None:
+    color_combinations = read_int_lists(color_combinations_str + ".palette")
+else:
+    for background_color_id, background_color in enumerate(colors):
+       for foreground_color_id, foreground_color in enumerate(colors):
+           if foreground_color_id == background_color_id:
+               continue
+           color_combinations.append((background_color_id, foreground_color_id))
 
 dst_width = cols * character_width
 dst_height = rows * character_height
@@ -256,8 +261,6 @@ if adjust_brightness:
     if color_space == "L":
         for character in palette:
             character["tile_pixels"] = [pixel * a + b for pixel in character["tile_pixels"]]
-
-
 
 # brightness_map = []
 
